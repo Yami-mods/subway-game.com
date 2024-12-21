@@ -1,0 +1,429 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Hacker Runner 3D</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            overflow: hidden;
+            font-family: 'Courier New', monospace;
+            background: #000;
+            color: #0f0;
+        }
+
+        #game-container {
+            position: fixed;
+            width: 100vw;
+            height: 100vh;
+        }
+
+        #score {
+            position: fixed;
+            top: 20px;
+            left: 20px;
+            color: #0f0;
+            font-size: 24px;
+            z-index: 100;
+            text-shadow: 0 0 5px #0f0;
+            font-family: 'Courier New', monospace;
+        }
+
+        #game-over {
+            position: fixed;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+            background: rgba(0, 32, 0, 0.9);
+            color: #0f0;
+            padding: 30px;
+            border-radius: 10px;
+            text-align: center;
+            z-index: 100;
+            border: 2px solid #0f0;
+            box-shadow: 0 0 20px #0f0;
+        }
+
+        #restart-button {
+            margin-top: 20px;
+            padding: 10px 20px;
+            font-size: 18px;
+            background: #020;
+            border: 2px solid #0f0;
+            color: #0f0;
+            border-radius: 5px;
+            cursor: pointer;
+            transition: all 0.3s;
+            font-family: 'Courier New', monospace;
+        }
+
+        #restart-button:hover {
+            background: #0f0;
+            color: #000;
+        }
+
+        .hidden {
+            display: none;
+        }
+
+
+        .yami {
+    position: absolute;
+     /* 5 inches higher than original position */
+    text-align: center;
+    width: 100%;
+    font-size: 20px; /* Increased font size */
+    font-weight: bold;
+    color: rgba(255, 255, 255, 0.7);
+    text-shadow: 0 0 10px rgba(0, 255, 255, 0.7), 0 0 20px rgba(255, 0, 0, 0.8);
+    animation: textZoom 3s infinite alternate;
+
+}
+
+@keyframes textZoom {
+    0%, 100% { transform: scale(1); }
+    50% { transform: scale(1.1); }
+}
+    </style>
+</head>
+<body>
+    <div id="game-container">
+        <div id="score">SCORE: 0</div>
+        <h2 class="yami" style="text-align: center; padding-top: 12px;">𝗗𝗲𝘃𝗲𝗹𝗼𝗽𝗲𝗿 ↬𝙔𝘼𝙈𝙄</h2>
+        <div id="game-over" class="hidden">
+            <h2>SYSTEM BREACH DETECTED</h2>
+            <p>FINAL SCORE: <span id="final-score">0</span></p>
+            <button id="restart-button">REINITIALIZE SYSTEM</button>
+        </div>
+    </div>
+
+    <script type="module">
+        import * as THREE from 'https://unpkg.com/three@0.160.0/build/three.module.js';
+
+        // Game Configuration
+        const CONFIG = {
+            INITIAL_SPEED: 10,
+            SPEED_INCREASE: 0.5,
+            SPEED_INCREASE_INTERVAL: 10,
+            LANE_WIDTH: 2,
+            LANE_LEFT: -2,
+            LANE_RIGHT: 2,
+            JUMP_FORCE: 15,
+            GRAVITY: -30,
+            GROUND_WIDTH: 10,
+            GROUND_LENGTH: 1000,
+            OBSTACLE_SPAWN_INTERVAL: 1.5,
+            OBSTACLE_SPAWN_DISTANCE: 50,
+            SCORE_INTERVAL: 1
+        };
+
+        // Player Class
+        class Player {
+            constructor(scene) {
+                this.scene = scene;
+                this.createPlayer();
+                this.reset();
+            }
+
+            createPlayer() {
+                const geometry = new THREE.BoxGeometry(1, 2, 1);
+                const material = new THREE.MeshPhongMaterial({ 
+                    color: 0x00ff00,
+                    emissive: 0x002200
+                });
+                this.mesh = new THREE.Mesh(geometry, material);
+                this.scene.add(this.mesh);
+            }
+
+            update(delta) {
+                if (this.isJumping) {
+                    this.updateJump(delta);
+                }
+            }
+
+            updateJump(delta) {
+                this.jumpVelocity += CONFIG.GRAVITY * delta;
+                this.mesh.position.y += this.jumpVelocity * delta;
+
+                if (this.mesh.position.y <= 1) {
+                    this.mesh.position.y = 1;
+                    this.isJumping = false;
+                    this.jumpVelocity = 0;
+                }
+            }
+
+            moveLeft() {
+                if (this.mesh.position.x > CONFIG.LANE_LEFT) {
+                    this.mesh.position.x -= CONFIG.LANE_WIDTH;
+                }
+            }
+
+            moveRight() {
+                if (this.mesh.position.x < CONFIG.LANE_RIGHT) {
+                    this.mesh.position.x += CONFIG.LANE_WIDTH;
+                }
+            }
+
+            jump() {
+                if (!this.isJumping) {
+                    this.isJumping = true;
+                    this.jumpVelocity = CONFIG.JUMP_FORCE;
+                }
+            }
+
+            getPosition() {
+                return this.mesh.position;
+            }
+
+            reset() {
+                this.mesh.position.set(0, 1, 0);
+                this.isJumping = false;
+                this.jumpVelocity = 0;
+            }
+        }
+
+        // Obstacle Manager Class
+        class ObstacleManager {
+            constructor(scene) {
+                this.scene = scene;
+                this.obstacles = [];
+                this.spawnTimer = 0;
+            }
+
+            update(deltaSpeed) {
+                this.spawnTimer += deltaSpeed;
+                
+                if (this.spawnTimer >= CONFIG.OBSTACLE_SPAWN_INTERVAL) {
+                    this.spawnObstacle();
+                    this.spawnTimer = 0;
+                }
+
+                this.updateObstacles(deltaSpeed);
+            }
+
+            spawnObstacle() {
+                const geometry = new THREE.BoxGeometry(1, 2, 1);
+                const material = new THREE.MeshPhongMaterial({ 
+                    color: 0x00ff00,
+                    wireframe: true
+                });
+                const obstacle = new THREE.Mesh(geometry, material);
+                
+                const lane = Math.floor(Math.random() * 3) - 1;
+                obstacle.position.set(
+                    lane * CONFIG.LANE_WIDTH,
+                    1,
+                    CONFIG.OBSTACLE_SPAWN_DISTANCE
+                );
+                
+                this.scene.add(obstacle);
+                this.obstacles.push(obstacle);
+            }
+
+            updateObstacles(deltaSpeed) {
+                for (let i = this.obstacles.length - 1; i >= 0; i--) {
+                    const obstacle = this.obstacles[i];
+                    obstacle.position.z -= deltaSpeed;
+
+                    if (obstacle.position.z < -10) {
+                        this.scene.remove(obstacle);
+                        this.obstacles.splice(i, 1);
+                    }
+                }
+            }
+
+            checkCollision(playerPosition) {
+                const playerBox = new THREE.Box3().setFromCenterAndSize(
+                    playerPosition,
+                    new THREE.Vector3(0.8, 1.8, 0.8)
+                );
+
+                for (const obstacle of this.obstacles) {
+                    const obstacleBox = new THREE.Box3().setFromObject(obstacle);
+                    if (playerBox.intersectsBox(obstacleBox)) {
+                        return true;
+                    }
+                }
+                return false;
+            }
+
+            reset() {
+                for (const obstacle of this.obstacles) {
+                    this.scene.remove(obstacle);
+                }
+                this.obstacles = [];
+                this.spawnTimer = 0;
+            }
+        }
+
+        // Score Manager Class
+        class ScoreManager {
+            constructor() {
+                this.scoreElement = document.getElementById('score');
+                this.reset();
+            }
+
+            update(delta) {
+                this.timePassed += delta;
+                if (this.timePassed >= CONFIG.SCORE_INTERVAL) {
+                    this.score++;
+                    this.updateDisplay();
+                    this.timePassed = 0;
+                }
+            }
+
+            updateDisplay() {
+                this.scoreElement.textContent = `SCORE: ${this.score}`;
+            }
+
+            getScore() {
+                return this.score;
+            }
+
+            reset() {
+                this.score = 0;
+                this.timePassed = 0;
+                this.updateDisplay();
+            }
+        }
+
+        // Main Game Class
+        class Game {
+            constructor() {
+                this.setupScene();
+                this.setupGame();
+                this.setupControls();
+            }
+
+            setupScene() {
+                this.scene = new THREE.Scene();
+                this.scene.fog = new THREE.Fog(0x000000, 20, 50);
+                
+                this.camera = new THREE.PerspectiveCamera(75, window.innerWidth / window.innerHeight, 0.1, 1000);
+                this.renderer = new THREE.WebGLRenderer({ antialias: true });
+                this.renderer.setSize(window.innerWidth, window.innerHeight);
+                document.getElementById('game-container').appendChild(this.renderer.domElement);
+                
+                this.camera.position.set(0, 5, -10);
+                this.camera.lookAt(0, 0, 0);
+
+                // Lighting
+                const ambientLight = new THREE.AmbientLight(0x00ff00, 0.6);
+                this.scene.add(ambientLight);
+
+                const directionalLight = new THREE.DirectionalLight(0x00ff00, 0.8);
+                directionalLight.position.set(10, 20, 0);
+                this.scene.add(directionalLight);
+
+                // Ground
+                const groundGeometry = new THREE.PlaneGeometry(CONFIG.GROUND_WIDTH, CONFIG.GROUND_LENGTH);
+                const groundMaterial = new THREE.MeshPhongMaterial({ 
+                    color: 0x001100,
+                    wireframe: true
+                });
+                this.ground = new THREE.Mesh(groundGeometry, groundMaterial);
+                this.ground.rotation.x = -Math.PI / 2;
+                this.scene.add(this.ground);
+            }
+
+            setupGame() {
+                this.player = new Player(this.scene);
+                this.obstacleManager = new ObstacleManager(this.scene);
+                this.scoreManager = new ScoreManager();
+                
+                this.gameSpeed = CONFIG.INITIAL_SPEED;
+                this.isGameOver = false;
+            }
+
+            setupControls() {
+                document.addEventListener('keydown', (e) => {
+                    if (this.isGameOver) return;
+                    
+                    switch(e.code) {
+                        case 'ArrowLeft':
+                            this.player.moveLeft();
+                            break;
+                        case 'ArrowRight':
+                            this.player.moveRight();
+                            break;
+                        case 'Space':
+                            this.player.jump();
+                            break;
+                    }
+                });
+
+                document.getElementById('restart-button').addEventListener('click', () => this.restart());
+            }
+
+            start() {
+                this.animate();
+            }
+
+            animate() {
+                if (this.isGameOver) return;
+
+                requestAnimationFrame(() => this.animate());
+                
+                this.update();
+                this.render();
+            }
+
+            update() {
+                const delta = 0.016;
+                
+                this.player.update(delta);
+                this.obstacleManager.update(this.gameSpeed * delta);
+                
+                if (this.obstacleManager.checkCollision(this.player.getPosition())) {
+                    this.gameOver();
+                    return;
+                }
+
+                this.scoreManager.update(delta);
+                if (this.scoreManager.getScore() % CONFIG.SPEED_INCREASE_INTERVAL === 0) {
+                    this.gameSpeed += CONFIG.SPEED_INCREASE;
+                }
+            }
+
+            render() {
+                this.renderer.render(this.scene, this.camera);
+            }
+
+            gameOver() {
+                this.isGameOver = true;
+                document.getElementById('game-over').classList.remove('hidden');
+                document.getElementById('final-score').textContent = this.scoreManager.getScore();
+            }
+
+            restart() {
+                this.isGameOver = false;
+                this.gameSpeed = CONFIG.INITIAL_SPEED;
+                this.player.reset();
+                this.obstacleManager.reset();
+                this.scoreManager.reset();
+                document.getElementById('game-over').classList.add('hidden');
+                this.animate();
+            }
+
+            onWindowResize() {
+                this.camera.aspect = window.innerWidth / window.innerHeight;
+                this.camera.updateProjectionMatrix();
+                this.renderer.setSize(window.innerWidth, window.innerHeight);
+            }
+        }
+
+        // Initialize game
+        const game = new Game();
+        game.start();
+
+        // Handle window resize
+        window.addEventListener('resize', () => game.onWindowResize());
+    </script>
+</body>
+</html>
